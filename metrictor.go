@@ -11,24 +11,15 @@ import (
 type collectTiming int
 
 const (
+	// OneTime is a collect timing. It means only collect for the first one time.
 	OneTime collectTiming = iota
+	// EachTime is a collect timing. It means only collect for each time.
 	EachTime
 )
 
 var (
-	startupTime time.Time
-
-	metrics            = expvar.NewMap("metrics")
-	hostname           = new(expvar.String)
-	startupTimeRFC3339 = new(expvar.String)
-	upTime             = new(expvar.Int)
-	// goVersion          = new(expvar.String)
-	goOS         = new(expvar.String)
-	goArch       = new(expvar.String)
-	numGoroutine = new(expvar.Int)
-	numCPU       = new(expvar.Int)
-	numCgoCall   = new(expvar.Int)
-
+	startupTime  time.Time
+	metrics      = expvar.NewMap("metrics")
 	evIntList    []*evInt
 	evStringList []*evString
 )
@@ -40,10 +31,7 @@ type evString struct {
 	fn  func() string
 }
 
-func (ev *evString) Collect() {
-	ev.fn()
-}
-
+// SetString sets metric collector for string value
 func SetString(ct collectTiming, key string, fn func() string) {
 	s := &evString{
 		ct:  ct,
@@ -65,6 +53,7 @@ func (ev *evInt) Collect() {
 	ev.fn()
 }
 
+// SetInt sets metric collector for int64 value
 func SetInt(ct collectTiming, key string, fn func() int64) {
 	s := &evInt{
 		ct:  ct,

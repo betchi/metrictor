@@ -7,7 +7,8 @@ import (
 	"github.com/betchi/metrictor"
 )
 
-func ExampleSetExpVarString() {
+// ExampleRun runs metrictor
+func ExampleRun() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
