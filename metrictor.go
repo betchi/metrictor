@@ -3,58 +3,147 @@ package metrictor
 import (
 	"context"
 	"expvar"
+	"os"
 	"runtime"
 	"time"
+)
+
+type collectTiming int
+
+const (
+	OneTime collectTiming = iota
+	EachTime
 )
 
 var (
 	startupTime time.Time
 
 	metrics            = expvar.NewMap("metrics")
+	hostname           = new(expvar.String)
 	startupTimeRFC3339 = new(expvar.String)
 	upTime             = new(expvar.Int)
-	goVersion          = new(expvar.String)
-	goOS               = new(expvar.String)
-	goArch             = new(expvar.String)
-	numGoroutine       = new(expvar.Int)
-	numCPU             = new(expvar.Int)
-	numCgoCall         = new(expvar.Int)
+	// goVersion          = new(expvar.String)
+	goOS         = new(expvar.String)
+	goArch       = new(expvar.String)
+	numGoroutine = new(expvar.Int)
+	numCPU       = new(expvar.Int)
+	numCgoCall   = new(expvar.Int)
+
+	evIntList    []*evInt
+	evStringList []*evString
 )
 
-// Run runs metrics collector
-func Run(ctx context.Context) {
-	metrics.Set("goVersion", goVersion)
-	metrics.Set("goOs", goOS)
-	metrics.Set("goArch", goArch)
-	metrics.Set("numGoroutine", numGoroutine)
-	metrics.Set("numCpu", numCPU)
-	metrics.Set("numCgoCall", numCgoCall)
-	metrics.Set("startup", startupTimeRFC3339)
-	metrics.Set("uptime", upTime)
+type evString struct {
+	ct  collectTiming
+	ev  *expvar.String
+	key string
+	fn  func() string
+}
 
+func (ev *evString) Collect() {
+	ev.fn()
+}
+
+func SetString(ct collectTiming, key string, fn func() string) {
+	s := &evString{
+		ct:  ct,
+		ev:  new(expvar.String),
+		key: key,
+		fn:  fn,
+	}
+	evStringList = append(evStringList, s)
+}
+
+type evInt struct {
+	ct  collectTiming
+	ev  *expvar.Int
+	key string
+	fn  func() int64
+}
+
+func (ev *evInt) Collect() {
+	ev.fn()
+}
+
+func SetInt(ct collectTiming, key string, fn func() int64) {
+	s := &evInt{
+		ct:  ct,
+		ev:  new(expvar.Int),
+		key: key,
+		fn:  fn,
+	}
+	evIntList = append(evIntList, s)
+}
+
+func setDefaultVar() {
 	startupTime = time.Now()
-	startupTimeRFC3339.Set(startupTime.Format(time.RFC3339))
 
-	collect()
-	ticker := time.Tick(time.Second * 5)
+	SetString(OneTime, "goVersion", func() string {
+		return runtime.Version()
+	})
+	SetString(OneTime, "goOs", func() string {
+		return runtime.GOOS
+	})
+	SetString(OneTime, "goArch", func() string {
+		return runtime.GOARCH
+	})
+	SetString(OneTime, "hostname", func() string {
+		hn, _ := os.Hostname()
+		return hn
+	})
+	SetInt(EachTime, "numGoroutine", func() int64 {
+		return int64(runtime.NumGoroutine())
+	})
+	SetInt(EachTime, "numCpu", func() int64 {
+		return int64(runtime.NumCPU())
+	})
+	SetInt(EachTime, "numCgoCall", func() int64 {
+		return int64(runtime.NumCgoCall())
+	})
+	SetString(OneTime, "startup", func() string {
+		return startupTime.Format(time.RFC3339)
+	})
+	SetInt(EachTime, "uptime", func() int64 {
+		return int64(time.Now().Sub(startupTime).Seconds())
+	})
+}
+
+// Run runs metrics collector
+func Run(ctx context.Context, d time.Duration) {
+	setDefaultVar()
+
+	for _, v := range evStringList {
+		metrics.Set(v.key, v.ev)
+	}
+
+	for _, v := range evIntList {
+		metrics.Set(v.key, v.ev)
+	}
+
+	collect(true)
+	ticker := time.Tick(d)
 	go func() {
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			case <-ticker:
-				collect()
+				collect(false)
 			}
 		}
 	}()
 }
 
-func collect() {
-	goVersion.Set(runtime.Version())
-	goOS.Set(runtime.GOOS)
-	goArch.Set(runtime.GOARCH)
-	numGoroutine.Set(int64(runtime.NumGoroutine()))
-	numCPU.Set(int64(runtime.NumCPU()))
-	numCgoCall.Set(int64(runtime.NumCgoCall()))
-	upTime.Set(int64(time.Now().Sub(startupTime).Seconds()))
+func collect(firstRun bool) {
+	for _, v := range evStringList {
+		if firstRun && v.ct == OneTime || v.ct == EachTime {
+			v.ev.Set(v.fn())
+		}
+	}
+
+	for _, v := range evIntList {
+		if firstRun && v.ct == OneTime || v.ct == EachTime {
+			v.ev.Set(v.fn())
+		}
+	}
 }
